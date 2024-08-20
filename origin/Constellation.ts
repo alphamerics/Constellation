@@ -67,22 +67,19 @@ export class Constellation {
      */
     private async initializeRoutes(): Promise<void> {
         const files = getFiles(this.directoryName, this.routesPath);
-
+    
         for (const file of files) {
             const fileURL = pathToFileURL(path.resolve(file)).href;
-    
             let data = await import(fileURL)
-                .then((module) => module.default) // Access the named export 'route'
+                .then((module) => module.default)
                 .catch((err) => console.log(err));
             
             if (data instanceof Formation) {
-                for (const route of data.routes) Constellation.routes.push(route);
-
+                Constellation.routes.push(...data.getRoutes());
             } else if (data instanceof Route) {
                 Constellation.routes.push(data);
-
             } else {
-                throw new TypeError("Export must be a Route or Formation instance.")
+                throw new TypeError("Export must be a Route or Formation instance.");
             }
         }
     }
@@ -98,14 +95,19 @@ export class Constellation {
      * 
      * @private
      */
-    private handleGet(route: Route, parameters: Record<string, string>, pathname: string, response: http.ServerResponse<http.IncomingMessage>) {
+    private async handleGet(route: Route, parameters: Record<string, string>, pathname: string, response: http.ServerResponse<http.IncomingMessage>) {
         if (Object.keys(parameters).length > 0 || pathname === route.path) {
-            const inferredParams = Object.values(parameters).map(param => I.infer(param));
-            // Call the route's callback with inferred parameters
-            const getResult = route.callback(...inferredParams);
-            response.statusCode = 200;
-            response.setHeader("Content-Type", "application/json");
-            response.end(JSON.stringify({ result: getResult, parameters: inferredParams }));
+            try {
+                const inferredParams = Object.values(parameters).map(param => I.infer(param));
+                const getResult = await route.callback(...inferredParams);
+                response.statusCode = 200;
+                response.setHeader("Content-Type", "application/json");
+                response.end(JSON.stringify(getResult));
+            } catch (error) {
+                response.statusCode = 500; // Internal Server Error
+                response.setHeader("Content-Type", "application/json");
+                response.end(JSON.stringify({ error: "Internal Server Error" }));
+            }
         }
     }
 
@@ -122,19 +124,19 @@ export class Constellation {
      * 
      * @private
      */
-    private handlePost(route: Route, parameters: Record<string, string>, pathname: string, request: http.IncomingMessage, response: http.ServerResponse<http.IncomingMessage>) {
+    private async handlePost(route: Route, parameters: Record<string, string>, pathname: string, request: http.IncomingMessage, response: http.ServerResponse<http.IncomingMessage>) {
         if (Object.keys(parameters).length > 0 || pathname === route.path) {
             let body = '';
             request.on('data', chunk => {
                 body += chunk.toString(); // Append each chunk of data
             });
-
-            request.on('end', () => {
+    
+            request.on('end', async () => {
                 try {
                     const parsedBody = JSON.parse(body);
                     const combinedParams = { ...parameters, ...parsedBody };
-                    const postResult = route.callback(...Object.values(combinedParams));
-
+                    const postResult = await route.callback(...Object.values(combinedParams));
+    
                     response.statusCode = 200;
                     response.setHeader("Content-Type", "application/json");
                     response.end(JSON.stringify({ result: postResult, parameters: combinedParams }));
@@ -158,10 +160,10 @@ export class Constellation {
      * 
      * @private
      */
-    private handleDelete(route: Route, parameters: Record<string, string>, pathname: string, response: http.ServerResponse<http.IncomingMessage>) {
+    private async handleDelete(route: Route, parameters: Record<string, string>, pathname: string, response: http.ServerResponse<http.IncomingMessage>) {
         if (Object.keys(parameters).length > 0 || pathname === route.path) {
             try {
-                const deleteResult = route.callback(...Object.values(parameters));
+                const deleteResult = await route.callback(...Object.values(parameters));
                 response.statusCode = 200;
                 response.setHeader("Content-Type", "application/json");
                 response.end(JSON.stringify({ result: deleteResult, parameters }));
@@ -186,7 +188,7 @@ export class Constellation {
     private async handleRequest(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
         const parsedUrl: UrlWithParsedQuery = parseUrl(request.url || '', true);
         const pathname: string = parsedUrl.pathname || '';
-        let routeMatched = false; // Flag to track if any route is matched
+        let routeMatched = false;
     
         for (const route of Constellation.routes) {
             const parameters = this.fetchParameters(pathname, route.path) || {};
@@ -194,19 +196,16 @@ export class Constellation {
             if (request.method === 'GET' && route.method === Method.GET) {
                 this.handleGet(route, parameters, pathname, response);
                 routeMatched = true;
-                return;
             }
     
             if (request.method === 'POST' && route.method === Method.POST) {
                 this.handlePost(route, parameters, pathname, request, response);
                 routeMatched = true;
-                return;
             }
-
+    
             if (request.method === 'DELETE' && route.method === Method.DELETE) {
                 this.handleDelete(route, parameters, pathname, response);
                 routeMatched = true;
-                return;
             }
         }
     
@@ -215,6 +214,7 @@ export class Constellation {
             response.end('Not Found');
         }
     }
+    
 
     /**
      * Splices route path and stores dynamic parameters in a Record object.
