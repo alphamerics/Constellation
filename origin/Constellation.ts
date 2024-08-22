@@ -29,15 +29,15 @@ function getFiles(directoryName: string, folder: string): string[] {
 }
 
 export const enum Method {
-    GET = 1,
-    POST = 2,
-    PUT = 3,
-    DELETE = 4,
-    PATCH = 5,
-    HEAD = 6,
-    OPTIONS = 7,
-    CONNECT = 8,
-    TRACE = 9,
+    GET = "GET",
+    POST = "POST",
+    PUT = "PUT",
+    DELETE = "DELETE",
+    PATCH = "PATCH",
+    HEAD = "HEAD",
+    OPTIONS = "OPTIONS",
+    CONNECT = "CONNECT",
+    TRACE = "TRACE",
 }
 
 export class Constellation {
@@ -128,14 +128,14 @@ export class Constellation {
         if (Object.keys(parameters).length > 0 || pathname === route.path) {
             let body = '';
             request.on('data', chunk => {
-                body += chunk.toString(); // Append each chunk of data
+                body += chunk.toString(); // Collect the body data chunks
             });
     
             request.on('end', async () => {
                 try {
-                    const parsedBody = JSON.parse(body);
-                    const combinedParams = { ...parameters, ...parsedBody };
-                    const postResult = await route.callback(...Object.values(combinedParams));
+                    const parsedBody = JSON.parse(body); // Parse the body as JSON
+                    const combinedParams = { ...parameters, ...parsedBody }; // Combine route and body parameters
+                    const postResult = await route.callback(combinedParams); // Pass combined params as a single object
     
                     response.statusCode = 200;
                     response.setHeader("Content-Type", "application/json");
@@ -160,20 +160,34 @@ export class Constellation {
      * 
      * @private
      */
-    private async handleDelete(route: Route, parameters: Record<string, string>, pathname: string, response: http.ServerResponse<http.IncomingMessage>) {
+    private async handleDelete(route: Route, parameters: Record<string, string>, pathname: string, request: http.IncomingMessage, response: http.ServerResponse<http.IncomingMessage>) {
         if (Object.keys(parameters).length > 0 || pathname === route.path) {
-            try {
-                const deleteResult = await route.callback(...Object.values(parameters));
-                response.statusCode = 200;
-                response.setHeader("Content-Type", "application/json");
-                response.end(JSON.stringify({ result: deleteResult, parameters }));
-            } catch (error) {
-                response.statusCode = 500; // Internal Server Error
-                response.setHeader("Content-Type", "application/json");
-                response.end(JSON.stringify({ error: "Internal Server Error" }));
-            }
+            let body = '';
+            request.on('data', chunk => {
+                body += chunk.toString(); // Collect the body data chunks
+            });
+    
+            request.on('end', async () => {
+                try {
+                    const parsedBody = body ? JSON.parse(body) : {}; // Parse the body as JSON if it exists
+                    const combinedParams = { ...parameters, ...parsedBody }; // Combine route and body parameters
+                    const deleteResult = await route.callback(combinedParams); // Pass combined params as a single object
+    
+                    response.statusCode = 200;
+                    response.setHeader("Content-Type", "application/json");
+                    response.end(JSON.stringify({ result: deleteResult, parameters: combinedParams }));
+                } catch (error) {
+                    response.statusCode = 400; // Bad Request
+                    response.setHeader("Content-Type", "application/json");
+                    response.end(JSON.stringify({ error: "Invalid JSON" }));
+                }
+            });
+        } else {
+            response.statusCode = 404; // Not Found
+            response.end();
         }
     }
+    
 
     /**
      * Traverses through initialized routes and handles the specified method.
@@ -204,7 +218,7 @@ export class Constellation {
             }
     
             if (request.method === 'DELETE' && route.method === Method.DELETE) {
-                this.handleDelete(route, parameters, pathname, response);
+                this.handleDelete(route, parameters, pathname, request, response);
                 routeMatched = true;
             }
         }
@@ -265,6 +279,10 @@ export class Constellation {
         Constellation.server.listen(port, hostname, () => {
             callback();
         });
+    }
+
+    public ip(request: http.IncomingMessage): string | string[] | undefined {
+        return request.headers["x-forwarded-for"] || request.socket.remoteAddress;
     }
     
 }

@@ -40,7 +40,7 @@ export default class Formation implements TFormation {
     }
 
     /**
-     * Pushes a new DELETE route wtih specified parameters into this.routes
+     * Pushes a new DELETE route with specified parameters into this.routes
      * 
      * @param path 
      * @param callback 
